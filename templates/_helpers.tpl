@@ -23,6 +23,8 @@ Create the name of the service account to use
       {{ else -}}
       name: {{ include "common.fullname" ( dict "root" .root "service" .root.Values.secrets ) }}
       {{ end -}}
+      {{ else if eq .value.name "self-external-secret" -}}
+      name: {{ include "common.fullname" ( dict "root" .root "service" .root.Values.externalSecret "serviceName" "external-secret" ) }}
       {{ else if and (hasKey .value "name" ) ( eq .value.name "self-metadata" ) -}}
       name: {{ include "common.fullname" ( dict "root" .root "service" .root.Values "serviceName" "metadata" ) }}
       {{ else -}}
@@ -46,8 +48,10 @@ imagePullSecrets:
 {{- toYaml .root.Values.global.image.pullSecrets | nindent 2 }}
 {{- else }}
 {{- if .root.Values.dockerregistry -}}
+{{- if .root.Values.dockerregistry.enabled -}}
 imagePullSecrets:
   - name: {{ include "common.fullname" ( dict "root" .root "service" .root.Values "serviceName" "dockerregistry" ) }}
+{{- end }}
 {{- end }}
 {{- end }}
 serviceAccountName: {{ include "application.serviceAccountName" ( .root ) }}
@@ -172,6 +176,34 @@ annotations:
 }
 {{- end }}
 
+{{- define "application.secrets.externaldockerregistry" -}}
+{
+  "auths": {
+    {{- range $registryName, $conf := . }}
+    {{- $url := ( default ( printf "{{ .%s-url }}" $registryName ) $conf.url ) }}
+    {{- $username := ( default ( printf "{{ .%s-username }}" $registryName ) $conf.username ) }}
+    {{- $password := ( default ( printf "{{ .%s-password }}" $registryName ) $conf.password ) }}
+    {{- $email := ( default ( printf "{{ .%s-email }}" $registryName ) $conf.email ) }}
+    {{ $url | quote }}: {
+      {{- if and ( hasKey $conf "username" ) ( hasKey $conf "password" ) }}
+      "auth": {{ printf "%s:%s" $conf.username $conf.password | b64enc | quote }},
+      {{- else if hasKey $conf "username" }}
+      "auth": {{ printf "{{ ( printf \"%s:%s\" .%s-password ) | b64enc | quote }}" $conf.username "%s" $registryName }},
+      {{- else if hasKey $conf "password" }}
+      "auth": {{ printf "{{ ( printf \"%s:%s\" .%s-username ) | b64enc | quote }}" "%s" $conf.password $registryName }},
+      {{- else }}
+      "auth": {{ printf "{{ ( printf \"%s:%s\" .%s-username .%s-password ) | b64enc | quote }}" "%s" "%s" $registryName $registryName }},
+      {{- end }}
+      "username": {{ $username | quote }},
+      "password": {{ $password | quote }},
+      "email": {{ $email | quote }}
+    },
+    {{- end }}
+    "fix-end-comma": {"auth": ""}
+  }
+}
+{{- end }}
+
 {{- define "application.volumes" -}}
 {{- $root := .root }}
 {{- with .service.volumes }}
@@ -182,12 +214,10 @@ volumes:
     secret:
       {{- if eq ( default "self" $value.secret.secretName ) "self" }}
       secretName: {{ include "common.fullname" ( dict "root" $root "service" $root.Values.secrets ) }}
-      {{- else }}
-      {{- if eq ( default "self" $value.secret.secretName ) "self-metadata" }}
-      secretName: {{ include "common.fullname" ( dict "root" $root "service" $root.Values "serviceName" "metadata" ) }}
+      {{- else if eq $value.secret.secretName "self-external-secret" }}
+      secretName: {{ include "common.fullname" ( dict "root" $root "service" $root.Values.externalSecret "serviceName" "external-secret" ) }}
       {{- else }}
       secretName: {{ $value.secret.secretName }}
-      {{- end }}
       {{- end }}
       {{- with $value.secret.items }}
       items: {{- . | toYaml | nindent 6 }}
@@ -197,6 +227,8 @@ volumes:
     configMap:
       {{- if eq ( default "self" $value.configMap.name ) "self" }}
       name: {{ include "common.fullname" ( dict "root" $root "service" $root.Values.configMaps ) }}
+      {{- else if eq ( default "self" $value.configMap.name ) "self-metadata" }}
+      name: {{ include "common.fullname" ( dict "root" $root "service" $root.Values "serviceName" "metadata" ) }}
       {{- else }}
       name: {{ $value.configMap.name }}
       {{- end }}
