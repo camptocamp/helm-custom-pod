@@ -30,6 +30,7 @@ jobs:
           - 3.5.1
 
     steps:
+      - run: free -m
       - run: docker system prune --all --force
       - uses: actions/checkout@v4
         with:
@@ -85,6 +86,8 @@ jobs:
 
       - name: Apply
         run: kubectl apply -f tests/expected.yaml
+      - name: Apply
+        run: kubectl apply -f tests/print-expected.yaml
 
       - name: Publish
         run: c2cciutils-publish
